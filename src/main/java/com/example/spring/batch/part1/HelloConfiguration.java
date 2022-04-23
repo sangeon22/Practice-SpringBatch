@@ -28,6 +28,9 @@ public class HelloConfiguration {
     @Bean
     public Job helloJob(){
         return jobBuilderFactory.get("helloJob")
+                // RunIdIncrementer()은 새로운 잡인스턴스를 만들도록 돕는다.
+                // RunId라는 파라미터값을 자동으로 시퀀셜하게 생성하기 때문이다.
+                // 그래서 파라미터가 없지만 새롭게 잡인스턴스가 만들어지면서 재실행이 되는 것임
                 .incrementer(new RunIdIncrementer())
                 .start(this.helloStep())
                 .build();
