@@ -3,6 +3,7 @@ package com.example.spring.batch.part3;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
@@ -95,12 +96,38 @@ public class ChunkProcessingConfiguration {
                 .build();
     }
 
-    private Tasklet tasklet() {
+    // 정석 task 기반
+//    private Tasklet tasklet() {
+//        return (contribution, chunkContext) -> {
+//            List<String> items = getItems();
+//            log.info("task item size : {}", items.size());
+//            return RepeatStatus.FINISHED;
+//        };
+//    }
+
+    // chunk 기반처럼 일정크기로 반복해서 처리하는 task 기반
+    private Tasklet tasklet(){
+        List<String> items = getItems();
+
         return (contribution, chunkContext) -> {
-            List<String> items = getItems();
-            log.info("task item size : {}", items.size());
-            return RepeatStatus.FINISHED;
+            StepExecution stepExecution = contribution.getStepExecution();
+            int chunkSize = 10;
+            int fromIndex = stepExecution.getReadCount();
+            int toIndex = fromIndex + chunkSize;
+
+            if (fromIndex>= items.size()){
+                return RepeatStatus.FINISHED;
+            }
+
+            List<String> sublist = items.subList(fromIndex, toIndex);
+
+            log.info("task item size : {}", sublist.size());
+
+            stepExecution.setReadCount(toIndex);
+
+            return RepeatStatus.CONTINUABLE;
         };
+
     }
 
     private List<String> getItems() {
