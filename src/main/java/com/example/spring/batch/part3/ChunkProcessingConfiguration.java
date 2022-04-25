@@ -1,10 +1,13 @@
 package com.example.spring.batch.part3;
 
+import io.micrometer.core.instrument.util.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -13,8 +16,10 @@ import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.support.ListItemReader;
 import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StreamUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,18 +52,75 @@ public class ChunkProcessingConfiguration {
         return jobBuilderFactory.get("chunkProcessingJob")
                 .incrementer(new RunIdIncrementer())
                 .start(this.taskBaseStep())
-                .next(this.chunkBaseStep())
+//                .next(this.chunkBaseStep())
+                // @JobScope를 달아놓았기 떄문에 null로 가능
+                .next(this.chunkBaseStep(null))
                 .build();
+    }
+
+    // task 기반
+    @Bean
+    public Step taskBaseStep() {
+        return stepBuilderFactory.get("taskBaseStep")
+                .tasklet(this.tasklet())
+                .build();
+    }
+
+    // 정석 task 기반
+//    private Tasklet tasklet() {
+//        return (contribution, chunkContext) -> {
+//            List<String> items = getItems();
+//            log.info("task item size : {}", items.size());
+//            return RepeatStatus.FINISHED;
+//        };
+//    }
+
+    // chunk 기반처럼 일정크기로 반복해서 처리하는 task 기반
+    private Tasklet tasklet(){
+        List<String> items = getItems();
+
+        return (contribution, chunkContext) -> {
+            StepExecution stepExecution = contribution.getStepExecution();
+            // 1. 배치의 JobParmeters 객체를 사용하는 경우(외부에서 주입되는 파라미터 사용)
+            // jobParameters를 꺼냄
+            JobParameters jobParameters = stepExecution.getJobParameters();
+
+
+//            int chunkSize = 10;
+            // jobParameters에서 정크사이즈를 갖는 키를 꺼낸다. 없다면 기본값으로 10을 반환하도록
+            String value = jobParameters.getString("chunkSize", "10");
+            int chunkSize = StringUtils.isNotEmpty(value) ? Integer.parseInt(value) : 10;
+
+            int fromIndex = stepExecution.getReadCount();
+            int toIndex = fromIndex + chunkSize;
+
+            if (fromIndex>= items.size()){
+                return RepeatStatus.FINISHED;
+            }
+
+            List<String> sublist = items.subList(fromIndex, toIndex);
+
+            log.info("task item size : {}", sublist.size());
+
+            stepExecution.setReadCount(toIndex);
+
+            return RepeatStatus.CONTINUABLE;
+        };
+
     }
 
     // chunk 기반
     // Reader에서 Null을 return할 때 까지 Step이 반복된다.
+    // 2. Spring Expression Language, SpringEL을 사용하는 방법(외부에서 주입되는 파라미터 사용)
+    // @JobScoper와 @Value는
     @Bean
-    public Step chunkBaseStep(){
+    @JobScope //잡파라미터스의 chunkSize라는 키를 가지고 chunkSize 변수에 설정할 수 있도록 코드 작성
+    public Step chunkBaseStep(@Value("#{jobParameters[chunkSize]}") String chunkSize){
         return stepBuilderFactory.get("chunkBaseStep")
                 // 100개 데이터를 10개씩 나눠서 처리
                 // <Reader의 input타입, Process의 output타입>으로 반환
-                .<String, String>chunk(10)
+//                .<String, String>chunk(10)
+                .<String, String>chunk(StringUtils.isNotEmpty(chunkSize) ? Integer.parseInt(chunkSize) : 10)
                 .reader(itemReader())
                 .processor(itemProcessor())
                 .writer(itemWriter())
@@ -84,50 +146,6 @@ public class ChunkProcessingConfiguration {
 //       return items -> items.forEach(log::info);
 
         return items -> log.info("chunk item size : {}", items.size());
-    }
-
-
-
-    // task 기반
-    @Bean
-    public Step taskBaseStep() {
-        return stepBuilderFactory.get("taskBaseStep")
-                .tasklet(this.tasklet())
-                .build();
-    }
-
-    // 정석 task 기반
-//    private Tasklet tasklet() {
-//        return (contribution, chunkContext) -> {
-//            List<String> items = getItems();
-//            log.info("task item size : {}", items.size());
-//            return RepeatStatus.FINISHED;
-//        };
-//    }
-
-    // chunk 기반처럼 일정크기로 반복해서 처리하는 task 기반
-    private Tasklet tasklet(){
-        List<String> items = getItems();
-
-        return (contribution, chunkContext) -> {
-            StepExecution stepExecution = contribution.getStepExecution();
-            int chunkSize = 10;
-            int fromIndex = stepExecution.getReadCount();
-            int toIndex = fromIndex + chunkSize;
-
-            if (fromIndex>= items.size()){
-                return RepeatStatus.FINISHED;
-            }
-
-            List<String> sublist = items.subList(fromIndex, toIndex);
-
-            log.info("task item size : {}", sublist.size());
-
-            stepExecution.setReadCount(toIndex);
-
-            return RepeatStatus.CONTINUABLE;
-        };
-
     }
 
     private List<String> getItems() {
