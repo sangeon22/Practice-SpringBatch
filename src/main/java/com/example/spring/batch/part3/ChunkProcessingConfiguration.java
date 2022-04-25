@@ -9,6 +9,7 @@ import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.item.ItemProcessor;
@@ -53,7 +54,7 @@ public class ChunkProcessingConfiguration {
                 .incrementer(new RunIdIncrementer())
                 .start(this.taskBaseStep())
 //                .next(this.chunkBaseStep())
-                // @JobScope를 달아놓았기 떄문에 null로 가능
+                // @JobScope를 달아놓았기 떄문에 null로 가능 Spring이 자동으로 Value 값을 체킹
                 .next(this.chunkBaseStep(null))
                 .build();
     }
@@ -62,7 +63,10 @@ public class ChunkProcessingConfiguration {
     @Bean
     public Step taskBaseStep() {
         return stepBuilderFactory.get("taskBaseStep")
-                .tasklet(this.tasklet())
+                //일반 tasklet
+//                .tasklet(this.tasklet()
+                // @JobScope를 달아놓았기 떄문에 null로 가능
+                .tasklet(this.tasklet(null))
                 .build();
     }
 
@@ -75,20 +79,22 @@ public class ChunkProcessingConfiguration {
 //        };
 //    }
 
-    // chunk 기반처럼 일정크기로 반복해서 처리하는 task 기반
-    private Tasklet tasklet(){
+    @Bean
+    @StepScope
+    public Tasklet tasklet(@Value("#{jobParameters[chunkSize]}") String value){
+        // chunk 기반처럼 일정크기로 반복해서 처리하는 task 기반
         List<String> items = getItems();
-
         return (contribution, chunkContext) -> {
             StepExecution stepExecution = contribution.getStepExecution();
             // 1. 배치의 JobParmeters 객체를 사용하는 경우(외부에서 주입되는 파라미터 사용)
             // jobParameters를 꺼냄
-            JobParameters jobParameters = stepExecution.getJobParameters();
+//            JobParameters jobParameters = stepExecution.getJobParameters();
+//
+//
+////            int chunkSize = 10;
+//            // jobParameters에서 정크사이즈를 갖는 키를 꺼낸다. 없다면 기본값으로 10을 반환하도록
+//            String value = jobParameters.getString("chunkSize", "10");
 
-
-//            int chunkSize = 10;
-            // jobParameters에서 정크사이즈를 갖는 키를 꺼낸다. 없다면 기본값으로 10을 반환하도록
-            String value = jobParameters.getString("chunkSize", "10");
             int chunkSize = StringUtils.isNotEmpty(value) ? Integer.parseInt(value) : 10;
 
             int fromIndex = stepExecution.getReadCount();
