@@ -134,7 +134,7 @@ public class ChunkProcessingConfiguration {
     }
 
 
-    // 아이템을 읽는다.
+    // 아이템을 만들거나 읽는다.
     private ItemReader<String> itemReader() {
         // ListItemReader는 Java에서 제공 들어가서 명세를 봐보자
         return new ListItemReader<>(getItems());
