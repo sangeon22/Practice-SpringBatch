@@ -94,7 +94,7 @@ public class ItemWriterConfiguration {
         JpaItemWriter<Person> itemWriter = new JpaItemWriterBuilder<Person>()
                 .entityManagerFactory(entityManagerFactory)
                 // select를 통해 수정대상인지 파악하기 때문에 select를 없애기위해
-                .usePersist(true)
+//                .usePersist(true)
                 .build();
         itemWriter.afterPropertiesSet();
 
