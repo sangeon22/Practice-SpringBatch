@@ -51,6 +51,8 @@ public class SavePersonConfiguration {
         return this.jobBuilderFactory.get("savePersonJob")
                 .incrementer(new RunIdIncrementer())
                 .start(this.savePersonStep(null))
+                .listener(new SavePersonListener.SavePersonJobExecutionListener())
+                .listener(new SavePersonListener.SavePersonAnnotationJobExecutionListener())
                 .build();
     }
 
@@ -63,6 +65,7 @@ public class SavePersonConfiguration {
                 //DuplicateValidationProcessor.class에 따로 구현함, person의 키가되는 getName으로, 항상 필터링하도록 false로 설정
                 .processor(new DuplicateValidationProcessor<>(Person::getName, Boolean.parseBoolean(allowDuplicate)))
                 .writer(itemWriter())
+                .listener(new SavePersonListener.SavePersonStepExecutionListener())
                 .build();
     }
 
