@@ -7,6 +7,7 @@ import org.springframework.batch.core.configuration.annotation.JobBuilderFactory
 import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.database.JpaItemWriter;
@@ -15,7 +16,9 @@ import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
+import org.springframework.batch.item.support.CompositeItemProcessor;
 import org.springframework.batch.item.support.CompositeItemWriter;
+import org.springframework.batch.item.support.builder.CompositeItemProcessorBuilder;
 import org.springframework.batch.item.support.builder.CompositeItemWriterBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +26,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 
 import javax.persistence.EntityManagerFactory;
+import java.util.function.Function;
 
 /*
 
@@ -62,11 +66,39 @@ public class SavePersonConfiguration {
         return this.stepBuilderFactory.get("savePersonStep")
                 .<Person, Person>chunk(10)
                 .reader(itemReader())
-                //DuplicateValidationProcessor.class에 따로 구현함, person의 키가되는 getName으로, 항상 필터링하도록 false로 설정
-                .processor(new DuplicateValidationProcessor<>(Person::getName, Boolean.parseBoolean(allowDuplicate)))
+                // DuplicateValidationProcessor.class에 따로 구현함, person의 키가되는 getName으로, 항상 필터링하도록 false로 설정
+//                .processor(new DuplicateValidationProcessor<>(Person::getName, Boolean.parseBoolean(allowDuplicate)))
+                // Skip 실습 프로세서
+                .processor(itemProcessor(allowDuplicate))
                 .writer(itemWriter())
                 .listener(new SavePersonListener.SavePersonStepExecutionListener())
+                // Skip과 같은 예외처리를 설정할 수 있도록
+                .faultTolerant()
+                .skip(NotFoundNameException.class)
+                .skipLimit(2)
                 .build();
+    }
+
+    private ItemProcessor<? super Person, ? extends Person> itemProcessor(String allowDuplicate) throws Exception {
+        DuplicateValidationProcessor<Person> duplicateValidationProcessor =
+                new DuplicateValidationProcessor<>(Person::getName, Boolean.parseBoolean(allowDuplicate));
+
+        // NotFoundNameException이 발생될 ItemProcessor를 하나 더 추가
+        ItemProcessor<Person, Person> validationProcessor = item -> {
+            if (item.isNotEmptyName()) {
+                return item;
+            }
+            throw new NotFoundNameException();
+        };
+
+        // 두 개의 Processor를 묶어줌
+        CompositeItemProcessor<Person, Person> itemProcessor = new CompositeItemProcessorBuilder()
+                .delegates(validationProcessor, duplicateValidationProcessor)
+                .build();
+
+        itemProcessor.afterPropertiesSet();
+
+        return itemProcessor;
     }
 
     private ItemWriter<? super Person> itemWriter() throws Exception {
