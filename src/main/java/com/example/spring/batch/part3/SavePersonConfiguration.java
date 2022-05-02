@@ -76,6 +76,8 @@ public class SavePersonConfiguration {
                 .faultTolerant()
                 .skip(NotFoundNameException.class)
                 .skipLimit(2)
+//                .retry(NotFoundNameException.class)
+//                .retryLimit(3)
                 .build();
     }
 
@@ -93,7 +95,7 @@ public class SavePersonConfiguration {
 
         // 두 개의 Processor를 묶어줌
         CompositeItemProcessor<Person, Person> itemProcessor = new CompositeItemProcessorBuilder()
-                .delegates(validationProcessor, duplicateValidationProcessor)
+                .delegates(new PersonValidationRetryProcessor(), validationProcessor, duplicateValidationProcessor)
                 .build();
 
         itemProcessor.afterPropertiesSet();
