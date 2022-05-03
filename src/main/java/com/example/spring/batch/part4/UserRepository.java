@@ -7,5 +7,5 @@ import java.util.Collection;
 import java.util.Map;
 
 public interface UserRepository extends JpaRepository<User, Long> {
-    Collection<Object> findALlByUpdatedDate(LocalDate updatedDate);
+    Collection<User> findALlByUpdatedDate(LocalDate updatedDate);
 }
