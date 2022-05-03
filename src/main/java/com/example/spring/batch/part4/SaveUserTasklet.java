@@ -34,7 +34,7 @@ public class SaveUserTasklet implements Tasklet {
             users.add(User.builder()
                     .orders(Collections.singletonList(Orders.builder()
                             .amount(1_000)
-                            .createdDate(LocalDate.of(2020, 11, 1))
+                            .createdDate(LocalDate.of(2020, 12, 2))
                             .itemName("item" + i)
                             .build()))
                     .username("test username" + i)
