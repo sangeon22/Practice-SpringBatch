@@ -1,5 +1,6 @@
 package com.example.spring.batch.part4;
 
+import com.example.spring.batch.part5.JobParametersDecide;
 import com.example.spring.batch.part5.OrderStatistics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -67,10 +68,19 @@ public class UserConfiguration {
     public Job userJob() throws Exception {
         return this.jobBuilderFactory.get("userJob")
                 .incrementer(new RunIdIncrementer())
+                // user를 저장하는 saveUserStep - tasklet으로 실행됨, 테스트를 하기위한 스텝
                 .start(this.saveUserStep())
+                // user의 등급을 조절하는 userLevelUpStep - chunk로 실행됨, user의 level 상태를 변경하는 스텝
                 .next(this.userLevelUpStep())
-                .next(this.orderStatisticsStep(null))
                 .listener(new LevelUpJobExecutionListener(userRepository))
+                // JobParametersDecide클래스의 오버라이딩한 decide메서드를 통해 해당 특정 조건에 따라 FlowExectionStatus가 리턴이 된다.
+                // 특정 조건 = 파라미터의 밸류가 있는지 확인
+                // 있으면 CONTINUE, 없으면 COMPLETED
+                .next(new JobParametersDecide("date"))
+                // CONTUNE라면? 아래 to에 있는 orderStatisticsStep을 실행
+                .on(JobParametersDecide.CONTINUE.getName())
+                .to(this.orderStatisticsStep(null))
+                .build()
                 .build();
     }
 
