@@ -1,5 +1,9 @@
-package com.example.spring.batch.part4;
+package com.example.spring.batch.part6;
 
+import com.example.spring.batch.part4.LevelUpJobExecutionListener;
+import com.example.spring.batch.part4.SaveUserTasklet;
+import com.example.spring.batch.part4.User;
+import com.example.spring.batch.part4.UserRepository;
 import com.example.spring.batch.part5.JobParametersDecide;
 import com.example.spring.batch.part5.OrderStatistics;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +13,8 @@ import org.springframework.batch.core.configuration.annotation.JobBuilderFactory
 import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.integration.async.AsyncItemProcessor;
+import org.springframework.batch.integration.async.AsyncItemWriter;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
@@ -25,6 +31,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.task.TaskExecutor;
 
 import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
@@ -33,6 +40,7 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Future;
 
 /*
 
@@ -43,28 +51,32 @@ import java.util.Map;
 
 @Slf4j
 @Configuration
-public class UserConfiguration {
+public class AsyncUserConfiguration {
 
     // 성능측정을 위해 JOB_NAME을 설정, 같은 JOB을 복사해서 쓸 것이기 때문에 Bean 등에서 구분할 수 있게
-    private final String JOB_NAME = "userJob";
+    private final String JOB_NAME = "asyncUserJob";
     private final int CHUNK = 1000;
     private final JobBuilderFactory jobBuilderFactory;
     private final StepBuilderFactory stepBuilderFactory;
     private final UserRepository userRepository;
     private final EntityManagerFactory entityManagerFactory;
     private final DataSource dataSource;
+    // SpringBatchExampleApplication에서 만든 taskExecutor Bean
+    private final TaskExecutor taskExecutor;
 
 
-    public UserConfiguration(JobBuilderFactory jobBuilderFactory,
-                             StepBuilderFactory stepBuilderFactory,
-                             UserRepository userRepository,
-                             EntityManagerFactory entityManagerFactory,
-                             DataSource dataSource) {
+    public AsyncUserConfiguration(JobBuilderFactory jobBuilderFactory,
+                                  StepBuilderFactory stepBuilderFactory,
+                                  UserRepository userRepository,
+                                  EntityManagerFactory entityManagerFactory,
+                                  DataSource dataSource,
+                                  TaskExecutor taskExecutor) {
         this.jobBuilderFactory = jobBuilderFactory;
         this.stepBuilderFactory = stepBuilderFactory;
         this.userRepository = userRepository;
         this.entityManagerFactory = entityManagerFactory;
         this.dataSource = dataSource;
+        this.taskExecutor = taskExecutor;
     }
 
     @Bean(JOB_NAME)
@@ -168,29 +180,43 @@ public class UserConfiguration {
     @Bean(JOB_NAME + "_userLevelUpStep")
     public Step userLevelUpStep() throws Exception {
         return this.stepBuilderFactory.get(JOB_NAME + "_userLevelUpStep")
-                .<User, User>chunk(CHUNK)
+                // AsyncItemProcessor는 ItemReader에서 받은 Input 타입을 java.util.concurrent에서 제공되는 Future로 감싸서 output Item으로 제공된다.
+                .<User, Future<User>>chunk(CHUNK)
                 .reader(itemReader())
                 .processor(itemProcessor())
                 .writer(itemWriter())
                 .build();
     }
 
-    private ItemWriter<? super User> itemWriter() {
-        return users -> users.forEach(x -> {
+    private AsyncItemWriter<User> itemWriter() {
+        ItemWriter<User> itemWriter = users -> users.forEach(x -> {
             x.levelUp();
             userRepository.save(x);
         });
+        AsyncItemWriter<User> asyncItemWriter = new AsyncItemWriter<>();
+        // AsyncItemWriter는 Delegate 메서드로 itemWriter를 감싸게 된다.
+        asyncItemWriter.setDelegate(itemWriter);
+
+        return asyncItemWriter;
     }
 
 
-    private ItemProcessor<? super User, ? extends User> itemProcessor() {
-        return user -> {
+    private AsyncItemProcessor<User, User> itemProcessor() {
+        ItemProcessor<User, User> itemProcessor = user -> {
             // 등급 상향 대상인지 판별
             if (user.availableLevelUp()) {
                 return user;
             }
             return null;
         };
+        AsyncItemProcessor<User, User> asyncItemProcessor = new AsyncItemProcessor<>();
+        // asyncItemProcessor는 Delegate 메서드로 itemProcessor를 감싸게 된다.
+        asyncItemProcessor.setDelegate(itemProcessor);
+        // taskExecutor 주입
+        asyncItemProcessor.setTaskExecutor(this.taskExecutor);
+
+        return asyncItemProcessor;
+
     }
 
     private ItemReader<? extends User> itemReader() throws Exception {

@@ -27,7 +27,7 @@ public class User {
 
 //    private int totalAmount;
     // user는 n개의 orders를 가질 수 있으니까 OneToMany, user가 저장되면서 order를 같이 저장할 수 있도록 PERSIST
-    @OneToMany(cascade = CascadeType.PERSIST)
+    @OneToMany(cascade = CascadeType.PERSIST, fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id")
     private List<Orders> orders;
 
