@@ -13,10 +13,13 @@ import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.FlowBuilder;
 import org.springframework.batch.core.job.flow.Flow;
 import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.partition.PartitionHandler;
+import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.step.tasklet.TaskletStep;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
@@ -124,7 +127,9 @@ public class ParallelUserConfiguration {
     public Flow splitFlow(@Value("#{jobParameters[date]}") String date) {
         // userLevelUpFlow를 만든다.
         Flow userLevelUpFLow = new FlowBuilder<SimpleFlow>(JOB_NAME + "_userLevelUpFlow")
-                .start(userLevelUpStep())
+//                .start(userLevelUpStep())
+                // ParallelStep + PartitionStep을 사용하기 위해
+                .start(userLevelUpManagerStep())
                 .build();
 
         // userLevelUpStep과 orderStatisticsStep을 하나로 합친다.
@@ -231,11 +236,14 @@ public class ParallelUserConfiguration {
     public Step userLevelUpStep() throws Exception {
         return this.stepBuilderFactory.get(JOB_NAME + "_userLevelUpStep")
                 .<User, User>chunk(CHUNK)
-                .reader(itemReader())
+//                .reader(itemReader())
+                // ParallelStep + PartitionStep을 사용하기 위해
+                .reader(itemReader(null, null))
                 .processor(itemProcessor())
                 .writer(itemWriter())
                 .build();
     }
+
 
     private ItemWriter<? super User> itemWriter() {
         return users -> users.forEach(x -> {
@@ -244,17 +252,8 @@ public class ParallelUserConfiguration {
         });
     }
 
-
-    private ItemProcessor<? super User, ? extends User> itemProcessor() {
-        return user -> {
-            // 등급 상향 대상인지 판별
-            if (user.availableLevelUp()) {
-                return user;
-            }
-            return null;
-        };
-    }
-
+/*
+    // 기존 ParallelStep ItemReader
     private ItemReader<? extends User> itemReader() throws Exception {
         JpaPagingItemReader<User> itemReader = new JpaPagingItemReaderBuilder<User>()
                 .queryString("select u from User u")
@@ -266,6 +265,67 @@ public class ParallelUserConfiguration {
         itemReader.afterPropertiesSet();
 
         return itemReader;
+    }*/
+
+    // ParallelStep + PartitionStep을 사용하기 위해
+    // UserLevelUpPartitioner에서 생성한 ExecutionContext를 사용하기 위해
+    // StepScope가 필요하고 StepSope로 사용하려면 Bean설정을 해야함
+    @Bean(JOB_NAME + "_userItemReader")
+    @StepScope
+    JpaPagingItemReader<? extends User> itemReader(@Value("#{stepExecutionContext[minId]}") Long minId,
+                                                   @Value("#{stepExecutionContext[maxId]}") Long maxId) throws Exception {
+
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("minId", minId);
+        parameters.put("maxId", maxId);
+
+        JpaPagingItemReader<User> itemReader = new JpaPagingItemReaderBuilder<User>()
+                .queryString("select u from User u where u.id between :minId and :maxId")
+                .parameterValues(parameters)
+                .entityManagerFactory(entityManagerFactory)
+                .pageSize(CHUNK)
+                .name(JOB_NAME + "_userItemReader")
+                .build();
+
+        itemReader.afterPropertiesSet();
+
+        return itemReader;
     }
+
+    // ParallelStep + PartitionStep을 사용하기 위해
+    // Master 슬레이브
+    @Bean(JOB_NAME + "_userLevelUpStep.manager")
+    public Step userLevelUpManagerStep() throws Exception {
+        return this.stepBuilderFactory.get(JOB_NAME + "_userLevelUpStep.manager")
+                .partitioner(JOB_NAME + "_userLevelUpStep", new UserLevelUpPartitioner(userRepository))
+                // userLevelUpManagerStep이 마스터, userLevelUpStep이 슬레이브가 된다.
+                .step(userLevelUpStep())
+                .partitionHandler(taskExecutorPartitionHandler())
+                .build();
+    }
+
+    // 이 PartitionHandler가 파티션을 핸들링할 수 있는 객체가 된다.
+    @Bean(JOB_NAME + "_taskExecutorPartitionHandler")
+    PartitionHandler taskExecutorPartitionHandler() throws Exception {
+        TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
+        // 핸들러에 슬레이브스텝을 설정하고
+        handler.setStep(userLevelUpStep());
+        handler.setTaskExecutor(this.taskExecutor);
+        // 여기서 사용할 GridSize가 PartitionUserConfiguration에서 사용할 gridSize와 동일
+        handler.setGridSize(8);
+
+        return handler;
+    }
+
+    private ItemProcessor<? super User, ? extends User> itemProcessor() {
+        return user -> {
+            // 등급 상향 대상인지 판별
+            if (user.availableLevelUp()) {
+                return user;
+            }
+            return null;
+        };
+    }
+
 
 }
